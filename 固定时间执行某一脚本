@@ -1,0 +1,36 @@
+#! /usr/bin/python
+#-*- coding:utf-8 -*-
+
+import os
+import time
+import sys
+from datetime import datetime,timedelta
+from time import sleep
+
+
+d_work_tbl= [
+    (17,45,"main.py"),
+];
+
+def daily_timer_work(hh,mm):
+    cur_time = datetime.utcnow() + timedelta(hours=8);
+    cur_time = cur_time.replace(second=0,microsecond=0);
+    dst_time = cur_time.replace(hour=hh,minute=mm);
+    delea = abs(dst_time - cur_time);
+    secs = delea.total_seconds();
+    return secs;
+
+def main():
+    for (h,m,cmd) in d_work_tbl:
+        #'''
+        secs = daily_timer_work(h,m);
+        print("Wait for:"+str(secs)+"s");
+        sys.stdout.flush();
+        if secs >= 0:
+            sleep(secs);
+            os.system(cmd);
+        #'''
+        #os.system(cmd);
+        
+if __name__ == '__main__':
+    main();
