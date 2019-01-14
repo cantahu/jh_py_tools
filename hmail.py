@@ -2,13 +2,12 @@
 
 '''
 # 模块名称：hmail
-# 模块版本：v1.0.1
+# 模块版本：v1.0.2
 # 功能描述：
  - 支持邮件发送
 # 版本变更说明：
- - 连接服务器追加Timeout参数默认5秒
- - 移除了服务器状态的判断，降低代码代码复杂度
- - Hcontact不对外暴露，内部实现降低代码复杂度
+ - 还是保持Hcontact对外暴露，使得代码统一性提高
+ - 追加了使用说明示列
 
 Date:2019-01-10
 Author:J.Hu
@@ -128,14 +127,13 @@ class Hsmtp():
         """
         self.__obj.login(user,passwd)
 
-    def set_sender(self,addr,name=None):
+    def set_sender(self,sender):
         """
         # 设置发信人
         """
-        try:
-            self.sender = Hcontact(addr,name)
-        except Exception as e:
-            raise e
+        if not isinstance(sender, Hcontact):
+            raise TypeError(sender)
+        self.sender = sender
 
     def set_receiver(self, recvlist_type, objlist=[]):
         """
@@ -216,3 +214,23 @@ class Hsmtp():
         关闭连接
         """
         self.__obj.quit()
+
+
+
+if __name__ == '__main__':
+    # Template for hmail SMTP
+    '''
+    mail = Hsmtp(server,port)
+    mail.login(user,pwd)
+    mail.set_sender(Hcontact('xxx@hj.com','xxx'))
+    mail.set_receiver(RECVTYPE_TO,[Hcontact('xx@hj.com','xx'),Hcontact('yy@hj.com','yy')])
+    mail.set_receiver(RECVTYPE_CC,[Hcontact('xx@hj.com','xx'),Hcontact('yy@hj.com','yy')])
+    mail.set_receiver(RECVTYPE_BCC,[Hcontact('xx@hj.com','xx'),Hcontact('yy@hj.com','yy')])
+    mail.set_mailtitle('MailTitle')
+    # 附件在邮件中以图片形式显示可以用HTMLCode
+    # <img src="cid:0"/> cid：0 代表附件ID为0的附件，需要自己拼装
+    mail.set_mailmsg('MailMsg')
+    mail.set_mailattach(['./1.png','2.png'])
+    mail.send()
+    mail.close()
+    '''
