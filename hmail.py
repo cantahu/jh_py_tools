@@ -1,10 +1,14 @@
 #! /usr/bin/env python
 
 '''
-模块名称：hmail
-模块版本：v1.0
-功能描述：
+# 模块名称：hmail
+# 模块版本：v1.0.1
+# 功能描述：
  - 支持邮件发送
+# 版本变更说明：
+ - 连接服务器追加Timeout参数默认5秒
+ - 移除了服务器状态的判断，降低代码代码复杂度
+ - Hcontact不对外暴露，内部实现降低代码复杂度
 
 Date:2019-01-10
 Author:J.Hu
@@ -20,10 +24,8 @@ from email.utils import formataddr
 from email.header import Header
 
 
-# 服务器连接状态
-SSTS_OFFLINE   = 0 # 服务器未连接
-SSTS_CONNECTED = 1 # 服务器已连接
-SSTS_LOGIN     = 2 # 用户已登陆
+# 默认Timeout，单位：秒
+TIMEOUT = 5
 
 # 邮件格式类型
 TYPE_PLAIN      = 'plain'
@@ -48,30 +50,29 @@ RECVTYPE_CC     = 'Cc'
 RECVTYPE_BCC    = 'Bcc'
 
 
-ERR_CONNECT_FAILED = 1
-ERR_LOGIN_FAILED   = 2
-
 class Hcontact:
     """
     联系人类型
     """
     def __init__(self, addr, name=None):
-        self.addr = addr
+        if not isinstance(addr,str):raise TypeError(addr)
+        self.addr = str(addr)
         self.name = name or addr
 
 class Hattach:
     """
     附件类型
     """
-    def __init__(self,path,id):
+    def __init__(self,path,name=None):
+        if not isinstance(path,str):raise TypeError(path)
         self.path = path
-        self.id = id
+        self.name = name or path.split('/')[-1]
 
 class Hsmtp():
     """
     SMTP业务封装实现
     """
-    def __init__(self,host,port,ssl=True):
+    def __init__(self,host,port=465,ssl=True):
         """
         初始化并连接服务器
         Arg：
@@ -92,7 +93,6 @@ class Hsmtp():
 
         # private
         self.__obj      = None          # SMTPLIB对象
-        self.__ssts     = SSTS_OFFLINE  # 当前连接状态
         self.__encode   = ENCODE_UTF8   # 编码类型
         self.__type     = TYPE_HTML     # 正文类型
         self.__att_type = TYPE_BASE_64  # 附件类型
@@ -105,54 +105,37 @@ class Hsmtp():
         # 连接服务器
         self.connect(host,port,ssl)
 
-    def connect(self,host,port,ssl):
+    def connect(self,host,port,ssl=True,timeout=TIMEOUT):
         """
         连接服务器
         # Arg：
           - host：服务器名
           - port：服务器端口
           - ssl：是否启用SSL(True：启用 / False：不启用) default:True
-        # 返回值：False 连接失败
+          - timeout:服务器连接超时时间
         """
-        # 如果已经连接到服务器了,关闭现有服务器，重新连接新服务器
-        if self.__ssts != SSTS_OFFLINE:
-            self.close()
+        if ssl:
+            self.__obj = smtplib.SMTP_SSL(host,port,timeout = timeout)
+        else:
+            self.__obj = smtplib.SMTP(host,port,timeout = timeout)
 
-        try:
-            if ssl:
-                self.__obj = smtplib.SMTP_SSL(host,port)
-            else:
-                self.__obj = smtplib.SMTP(host,port)
-
-            self.__ssts = SSTS_CONNECTED    # 更新状态
-        except:
-            self.__obj = None
-            self.errmsg = 'Connect to SMTP Server{0}:{1} Failed'.format(host,port)
 
     def login(self, user, passwd):
         """
         # 登陆
           - user：用户名
           - passwd:密码
-        # 返回值：False：登陆失败,True登陆成功
         """
-        # 未连接到服务器则不进行登陆
-        if self.__ssts < SSTS_CONNECTED:
-            return False
+        self.__obj.login(user,passwd)
 
-        try:
-            self.__obj.login(user,passwd)
-            self.__ssts = SSTS_LOGIN
-            return True
-        except:
-            return False
-
-    def set_sender(self,sender):
+    def set_sender(self,addr,name=None):
         """
         # 设置发信人
         """
-        if isinstance(sender,Hcontact):
-            self.sender = sender
+        try:
+            self.sender = Hcontact(addr,name)
+        except Exception as e:
+            raise e
 
     def set_receiver(self, recvlist_type, objlist=[]):
         """
@@ -164,7 +147,8 @@ class Hsmtp():
             if recvlist_type == type:
                 del list[:]
                 for data in objlist:
-                    if isinstance(data, Hcontact):list.append(data)
+                    if not isinstance(data, Hcontact):raise TypeError(data)
+                    list.append(data)
                 break
 
     def set_mailtitle(self, title):
@@ -183,49 +167,52 @@ class Hsmtp():
         """
         # 设置邮件附件列表
         """
-        self.attach_list = attach_list
+        self.list_attach = attach_list
 
-    def send(self,title=None,msg=None):
+    def send(self,title=None,msg=None,att_list=None):
         """
         # 发送邮件
         """
-        # 未登陆
-        if self.__ssts != SSTS_LOGIN:
-            return False
-
         title = title or self.title
         msg = msg or self.msg
+        att_list = att_list or self.list_attach
         mime = MIMEMultipart()
 
+        def mime_set(mime,type,val):
+            mime[type] = formataddr([val.name,val.addr])
+
+        def mime_attach(mime, att, attid):
+            li = Hattach(att)
+            att = MIMEText(open(li.path,'rb').read(), TYPE_BASE_64, self.__encode)
+            att["Content-Type"] = 'application/octet-stream'
+            att["Content-Disposition"] = 'attachment; filename='+li.name
+            att.add_header('Content-ID', str(attid))
+            mime.attach(att)
+
         # Title 设置
-        mime['subject'] = Header(title,self.__encode)
+        mime['Subject'] = Header(title,self.__encode)
 
         # 发件人设置
-        if self.sender is None:
-            return False
-        mime[SENDTYPE_FROM] = formataddr([self.sender.name,self.sender.addr])
+        mime_set(mime, SENDTYPE_FROM, self.sender)
 
         # 收件人设置
         send_list = []
         for (type,list) in self.__recv_mapping_list:
             for contact in list:
                 send_list.append(contact.addr)
-                mime[type] = formataddr([contact.name,contact.addr])
-        if len(send_list) == 0:
-            return False;
+                mime_set(mime,type,contact)
 
         # 附件设置
-        
-        try:
-            mime.attach(MIMEText(msg,self.__type,self.__encode))
-            self.__obj.sendmail(self.sender.addr, send_list, mime.as_string())
-        except:
-            return False
-        return True
+        attid = 0
+        for li in att_list:
+            mime_attach(mime,li,attid)
+            attid+=1
+
+        mime.attach(MIMEText(msg,self.__type,self.__encode))
+        self.__obj.sendmail(self.sender.addr, send_list, mime.as_string())
 
     def close(self):
         """
         关闭连接
         """
         self.__obj.quit()
-        self.__ssts = SSTS_OFFLINE
